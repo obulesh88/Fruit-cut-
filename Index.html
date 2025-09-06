@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Knife Fruit Cut Game</title>
+  <style>
+    body { margin: 0; background: #222; overflow: hidden; font-family: sans-serif; }
+    #score { position: absolute; top: 10px; left: 10px; color: white; font-size: 24px; }
+    #gameOver { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: white; font-size: 40px; display: none; }
+    #restart { 
+      position: absolute; 
+      top: 60%; 
+      left: 50%; 
+      transform: translateX(-50%); 
+      color: white; 
+      background: #ff4757; 
+      border: none; 
+      padding: 10px 20px; 
+      font-size: 20px; 
+      border-radius: 5px; 
+      cursor: pointer; 
+      display: none; 
+    }
+  </style>
+</head>
+<body>
+  <div id="score">Score: 0</div>
+  <div id="gameOver">💥 Game Over 💥</div>
+  <button id="restart">Restart Game</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script>
+    let scene = new THREE.Scene();
+    let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    let renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    camera.position.z = 6;
+
+    let score = 0;
+    let fruits = [];
+    let particles = [];
+    let gameOver = false;
+    let cuttingActive = false;
+    let fingerPositions = [];
+
+    const fruitList = ["🍓","🍉","🍑","🍒","🌶️","🍅","🍎"];
+    const bombEmoji = "💣";
+
+    function createEmojiSprite(emoji, size = 1) {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = 128;
+      canvas.height = 128;
+      ctx.font = "100px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(emoji, canvas.width / 2, canvas.height / 2);
+      const texture = new THREE.CanvasTexture(canvas);
+      const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+      const sprite = new THREE.Sprite(material);
+      sprite.scale.set(size, size, size);
+      return sprite;
+    }
+
+    let knife = createEmojiSprite("🔪", 1.5);
+    knife.position.set(3.5, 0, 0);
+    scene.add(knife);
+
+    function spawnFruitOrBomb() {
+      if (gameOver) return;
+      let isBomb = Math.random() < 0.2;
+      let emoji = isBomb ? bombEmoji : fruitList[Math.floor(Math.random() * fruitList.length)];
+      let obj = createEmojiSprite(emoji);
+      obj.position.set((Math.random() * 4) - 2, -4, 0);
+      obj.userData = {
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 1, 5 + Math.random() * 2, 0),
+        isBomb: isBomb
+      };
+      scene.add(obj);
+      fruits.push(obj);
+    }
+
+    function spawnLoop() {
+      if (!gameOver) {
+        spawnFruitOrBomb();
+        setTimeout(spawnLoop, 800);
+      }
+    }
+    spawnLoop();
+
+    function spawnJuice(position) {
+      for (let i = 0; i < 8; i++) {
+        let drop = createEmojiSprite("💧", 0.5);
+        drop.position.copy(position);
+        drop.userData = { velocity: new THREE.Vector3((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4, 0), life: 0.5 };
+        scene.add(drop);
+        particles.push(drop);
+      }
+    }
+
+    function pointToLineDistance(point, lineStart, lineEnd) {
+      const lineVec = new THREE.Vector3().subVectors(lineEnd, lineStart);
+      const pointVec = new THREE.Vector3().subVectors(point, lineStart);
+      const lineLength = lineVec.length();
+      lineVec.normalize();
+      const dot = pointVec.dot(lineVec);
+      if (dot < 0) return point.distanceTo(lineStart);
+      if (dot > lineLength) return point.distanceTo(lineEnd);
+      const closestPoint = new THREE.Vector3().copy(lineStart).add(lineVec.multiplyScalar(dot));
+      return point.distanceTo(closestPoint);
+    }
+
+    function endGame() {
+      document.getElementById("gameOver").style.display = "block";
+      document.getElementById("restart").style.display = "block";
+      gameOver = true;
+    }
+
+    document.getElementById("restart").addEventListener("click", () => {
+      score = 0;
+      document.getElementById("score").textContent = "Score: 0";
+      document.getElementById("gameOver").style.display = "none";
+      document.getElementById("restart").style.display = "none";
+      gameOver = false;
+      fruits.forEach(f => scene.remove(f));
+      particles.forEach(p => scene.remove(p));
+      fruits = [];
+      particles = [];
+      spawnLoop();
+    });
+
+    window.addEventListener("pointerdown", (e) => {
+      cuttingActive = true;
+      fingerPositions = [];
+      updateKnifePosition(e);
+      knife.material.color.set(0xff0000);
+    });
+
+    window.addEventListener("pointermove", (e) => {
+      if (cuttingActive) {
+        updateKnifePosition(e);
+        let ndcX = (e.clientX / window.innerWidth) * 2 - 1;
+        let ndcY = -(e.clientY / window.innerHeight) * 2 + 1;
+        let worldPos = new THREE.Vector3(ndcX * 5, ndcY * 3, 0);
+        fingerPositions.push(worldPos);
+        if (fingerPositions.length > 8) fingerPositions.shift();
+        checkFingerCut();
+      }
+    });
+
+    window.addEventListener("pointerup", () => {
+      cuttingActive = false;
+      knife.material.color.set(0xffffff);
+      fingerPositions = [];
+    });
+
+    function updateKnifePosition(e) {
+      let ndcX = (e.clientX / window.innerWidth) * 2 - 1;
+      let ndcY = -(e.clientY / window.innerHeight) * 2 + 1;
+      knife.position.x = ndcX * 5;
+      knife.position.y = ndcY * 3;
+    }
+
+    function checkFingerCut() {
+      if (fingerPositions.length < 2) return;
+      let lastPos = fingerPositions[fingerPositions.length - 1];
+      let prevPos = fingerPositions[fingerPositions.length - 2];
+      let speed = lastPos.distanceTo(prevPos);
+      if (speed < 0.05) return; // Ignore slow movement
+
+      for (let i = fruits.length - 1; i >= 0; i--) {
+        let fruit = fruits[i];
+        for (let j = 0; j < fingerPositions.length - 1; j++) {
+          const pointA = fingerPositions[j];
+          const pointB = fingerPositions[j + 1];
+          if (pointToLineDistance(fruit.position, pointA, pointB) < 0.7) {
+            if (fruit.userData.isBomb) {
+              endGame();
+              return;
+            } else {
+              score++;
+              document.getElementById("score").textContent = "Score: " + score;
+              spawnJuice(fruit.position);
+            }
+            scene.remove(fruit);
+            fruits.splice(i, 1);
+            break;
+          }
+        }
+      }
+    }
+
+    let clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      let delta = clock.getDelta();
+      if (!gameOver) {
+        fruits.forEach(fruit => {
+          fruit.userData.velocity.y -= 9.8 * delta;
+          fruit.position.add(fruit.userData.velocity.clone().multiplyScalar(delta));
+        });
+      }
+      for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.userData.life -= delta;
+        p.position.add(p.userData.velocity.clone().multiplyScalar(delta));
+        if (p.userData.life <= 0) {
+          scene.remove(p);
+          particles.splice(i, 1);
+        }
+      }
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>

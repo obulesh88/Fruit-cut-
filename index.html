@@ -7,26 +7,11 @@
     body { margin: 0; background: #222; overflow: hidden; font-family: sans-serif; }
     #score { position: absolute; top: 10px; left: 10px; color: white; font-size: 24px; }
     #gameOver { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: white; font-size: 40px; display: none; }
-    #restart { 
-      position: absolute; 
-      top: 60%; 
-      left: 50%; 
-      transform: translateX(-50%); 
-      color: white; 
-      background: #ff4757; 
-      border: none; 
-      padding: 10px 20px; 
-      font-size: 20px; 
-      border-radius: 5px; 
-      cursor: pointer; 
-      display: none; 
-    }
   </style>
 </head>
 <body>
   <div id="score">Score: 0</div>
   <div id="gameOver">💥 Game Over 💥</div>
-  <button id="restart">Restart Game</button>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script>
@@ -114,22 +99,9 @@
 
     function endGame() {
       document.getElementById("gameOver").style.display = "block";
-      document.getElementById("restart").style.display = "block";
       gameOver = true;
+      setTimeout(() => location.reload(), 2000); // auto-restart after 2s
     }
-
-    document.getElementById("restart").addEventListener("click", () => {
-      score = 0;
-      document.getElementById("score").textContent = "Score: 0";
-      document.getElementById("gameOver").style.display = "none";
-      document.getElementById("restart").style.display = "none";
-      gameOver = false;
-      fruits.forEach(f => scene.remove(f));
-      particles.forEach(p => scene.remove(p));
-      fruits = [];
-      particles = [];
-      spawnLoop();
-    });
 
     window.addEventListener("pointerdown", (e) => {
       cuttingActive = true;
@@ -145,6 +117,84 @@
         let ndcY = -(e.clientY / window.innerHeight) * 2 + 1;
         let worldPos = new THREE.Vector3(ndcX * 5, ndcY * 3, 0);
         fingerPositions.push(worldPos);
+        if (fingerPositions.length > 8) fingerPositions.shift();
+        checkFingerCut();
+      }
+    });
+
+    window.addEventListener("pointerup", () => {
+      cuttingActive = false;
+      knife.material.color.set(0xffffff);
+      fingerPositions = [];
+    });
+
+    function updateKnifePosition(e) {
+      let ndcX = (e.clientX / window.innerWidth) * 2 - 1;
+      let ndcY = -(e.clientY / window.innerHeight) * 2 + 1;
+      knife.position.x = ndcX * 5;
+      knife.position.y = ndcY * 3;
+    }
+
+    function checkFingerCut() {
+      if (fingerPositions.length < 2) return;
+      let lastPos = fingerPositions[fingerPositions.length - 1];
+      let prevPos = fingerPositions[fingerPositions.length - 2];
+      let speed = lastPos.distanceTo(prevPos);
+      if (speed < 0.05) return;
+
+      for (let i = fruits.length - 1; i >= 0; i--) {
+        let fruit = fruits[i];
+        for (let j = 0; j < fingerPositions.length - 1; j++) {
+          const pointA = fingerPositions[j];
+          const pointB = fingerPositions[j + 1];
+          if (pointToLineDistance(fruit.position, pointA, pointB) < 0.7) {
+            if (fruit.userData.isBomb) {
+              endGame();
+              return;
+            } else {
+              score++;
+              document.getElementById("score").textContent = "Score: " + score;
+              spawnJuice(fruit.position);
+            }
+            scene.remove(fruit);
+            fruits.splice(i, 1);
+            break;
+          }
+        }
+      }
+    }
+
+    let clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      let delta = clock.getDelta();
+      if (!gameOver) {
+        fruits.forEach(fruit => {
+          fruit.userData.velocity.y -= 9.8 * delta;
+          fruit.position.add(fruit.userData.velocity.clone().multiplyScalar(delta));
+        });
+      }
+      for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.userData.life -= delta;
+        p.position.add(p.userData.velocity.clone().multiplyScalar(delta));
+        if (p.userData.life <= 0) {
+          scene.remove(p);
+          particles.splice(i, 1);
+        }
+      }
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html        fingerPositions.push(worldPos);
         if (fingerPositions.length > 8) fingerPositions.shift();
         checkFingerCut();
       }
